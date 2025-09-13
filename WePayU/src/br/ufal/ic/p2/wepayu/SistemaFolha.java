@@ -23,7 +23,6 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -848,7 +847,7 @@ public class SistemaFolha implements Serializable, Cloneable {
     }
 }
     
-    public double totalFolhaValor(LocalDate data) {
+    public String totalFolha(LocalDate data) {
         Objects.requireNonNull(data, "Data invalida.");
 
         if (isEndOfMonth(data)) {
@@ -865,16 +864,7 @@ public class SistemaFolha implements Serializable, Cloneable {
             return sumBrutoHoristas(inicioSemana, data);
         }
 
-        return 0.0;
-    }
-
-
-    public String totalFolha(LocalDate data) {
-        return fmt2(totalFolhaValor(data));
-    }
-
-    private static String fmt2(double v) {
-    return String.format(Locale.US, "%.2f", v).replace('.', ',');
+        return "0,00";
     }
 
 
@@ -890,8 +880,8 @@ public class SistemaFolha implements Serializable, Cloneable {
         return (dias % 14) == 13;
     }
 
-    private double sumBrutoHoristas(LocalDate inicio, LocalDate fim) {
-        double total = 0.0;
+    private String sumBrutoHoristas(LocalDate inicio, LocalDate fim) {
+        double total = 0.00;
         for (Empregado e : this.empregados.values()) { 
             if (e instanceof EmpregadoHorista) {
                 EmpregadoHorista h = (EmpregadoHorista) e;
@@ -899,12 +889,12 @@ public class SistemaFolha implements Serializable, Cloneable {
                 total += brutoSemana;
             }
         }
-        return arred2(total);
+        return String.format("%.2f", total).replace('.', ',');
     }
 
 
-    private double sumBrutoComissionados(LocalDate inicio, LocalDate fim) {
-        double total = 0.0;
+    private String sumBrutoComissionados(LocalDate inicio, LocalDate fim) {
+        double total = 0.00;
         for (Empregado e : this.empregados.values()) { 
             if (e instanceof EmpregadoComissionado) {
                 EmpregadoComissionado c = (EmpregadoComissionado) e;
@@ -914,18 +904,18 @@ public class SistemaFolha implements Serializable, Cloneable {
                 total += (fixoQuinzenal + comissao);
             }
         }
-        return arred2(total);
+        return String.format("%.2f", total).replace('.', ',');
     }
 
-    private double sumBrutoAssalariados() {
-        double total = 0.0;
+    private String sumBrutoAssalariados() {
+        double total = 0.00;
         for (Empregado e : this.empregados.values()) { 
             if (e instanceof EmpregadoAssalariado && !(e instanceof EmpregadoComissionado)) {
                 EmpregadoAssalariado a = (EmpregadoAssalariado) e;
                 total += a.getSalarioMensal();
             }
         }
-        return arred2(total);
+        return String.format("%.2f", total).replace('.', ',');
     }
 
     private double calcularBrutoHorista(EmpregadoHorista h, LocalDate inicio, LocalDate fim) {
@@ -953,11 +943,6 @@ public class SistemaFolha implements Serializable, Cloneable {
             }
         }
         return total;
-    }
-
-
-    private double arred2(double v) {
-        return Math.round(v * 100.0) / 100.0;
     }
 
     public String getEmpregadoPorNome(String nome, String indice) throws Exception {
