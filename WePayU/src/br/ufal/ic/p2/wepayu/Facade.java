@@ -68,7 +68,7 @@ public class Facade {
 
     public String totalFolha(String data) {
         LocalDate d = LocalDate.parse(data, DMY);
-        return sistema.totalFolha(d);  // ou totalFolha(d) se você adotou a versão String
+        return sistema.totalFolha(d); 
     }
 
 
@@ -118,3 +118,4 @@ public class Facade {
         return sistema.getVendasRealizadas(empId, dataInicial, dataFinal);
     }
 }
+
