@@ -15,6 +15,8 @@ import br.ufal.ic.p2.wepayu.models.payment.MetodoPagamentoCorreios;
 import br.ufal.ic.p2.wepayu.models.payment.MetodoPagamentoEmMaos;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.DateTimeException;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -25,6 +27,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 
 public class SistemaFolha implements Serializable, Cloneable {
 
@@ -558,6 +562,7 @@ public class SistemaFolha implements Serializable, Cloneable {
         // fazer
     }
 
+
     public void rodaFolha(String data) throws Exception {
     LocalDate d;
     try {
@@ -570,6 +575,7 @@ public class SistemaFolha implements Serializable, Cloneable {
 }
 
     public void rodaFolha(String data, String saida) throws Exception {
+
     if (data == null || data.trim().isEmpty()) throw new DataInvalidaException();
     LocalDate currentDate;
     try {
@@ -584,152 +590,220 @@ public class SistemaFolha implements Serializable, Cloneable {
     for (Map.Entry<String, Empregado> e : this.empregados.entrySet()) _emps.add(e.getValue());
     _emps.sort((a,b) -> a.getNome().compareToIgnoreCase(b.getNome()));
 
-    java.util.List<String> horistasLines = new java.util.ArrayList<>();
-    double totalHoristasNormalHours = 0.0;
-    double totalHoristasExtraHours = 0.0;
-    double totalHoristasBruto = 0.0;
-    double totalHoristasDescontos = 0.0;
-    double totalHoristasLiquido = 0.0;
+    StringBuilder horistasLines = new StringBuilder();
+    BigDecimal totalHoristasNormalHours = BigDecimal.ZERO;
+    BigDecimal totalHoristasExtraHours = BigDecimal.ZERO;
+    BigDecimal totalHoristasBruto = BigDecimal.ZERO;
+    BigDecimal totalHoristasDescontos = BigDecimal.ZERO;
+    BigDecimal totalHoristasLiquido = BigDecimal.ZERO;
 
-    java.util.List<String> assalariadosLines = new java.util.ArrayList<>();
-    double totalAssalariadosBruto = 0.0;
-    double totalAssalariadosDescontos = 0.0;
-    double totalAssalariadosLiquido = 0.0;
+    StringBuilder assalariadosLines = new StringBuilder();
+    BigDecimal totalAssalariadosBruto = BigDecimal.ZERO;
+    BigDecimal totalAssalariadosDescontos = BigDecimal.ZERO;
+    BigDecimal totalAssalariadosLiquido = BigDecimal.ZERO;
 
-    java.util.List<String> comissionadosLines = new java.util.ArrayList<>();
-    double totalComissionadosBruto = 0.0;
-    double totalComissionadosDescontos = 0.0;
-    double totalComissionadosLiquido = 0.0;
+    StringBuilder comissionadosLines = new StringBuilder();
+    BigDecimal totalComissionadosBruto = BigDecimal.ZERO;
+    BigDecimal totalComissionadosDescontos = BigDecimal.ZERO;
+    BigDecimal totalComissionadosLiquido = BigDecimal.ZERO;
 
     java.text.DecimalFormatSymbols sym = new java.text.DecimalFormatSymbols();
     sym.setDecimalSeparator(',');
     java.text.DecimalFormat df2 = new java.text.DecimalFormat("0.00");
     df2.setDecimalFormatSymbols(sym);
+    java.text.DecimalFormat df1 = new java.text.DecimalFormat("0.0");
+    df1.setDecimalFormatSymbols(sym);
+
+    boolean isHoristaPayday = currentDate.getDayOfWeek() == DayOfWeek.FRIDAY;
+    boolean isAssalariadoPayday = currentDate.equals(currentDate.withDayOfMonth(currentDate.lengthOfMonth()));
+    boolean isComissionadoPayday = false;
+    if (!currentDate.isBefore(comissionadoFirstPay)) {
+        long days = java.time.temporal.ChronoUnit.DAYS.between(comissionadoFirstPay, currentDate);
+        if (currentDate.getDayOfWeek() == java.time.DayOfWeek.FRIDAY && days % 14 == 0) isComissionadoPayday = true;
+    }
+
 
     for (Empregado emp : _emps) {
-        LocalDate periodStart = null;
-        LocalDate periodEnd = null;
-        boolean isPayday = false;
 
-        if (emp instanceof EmpregadoHorista) {
-            if (currentDate.getDayOfWeek() == java.time.DayOfWeek.FRIDAY) {
-                EmpregadoHorista h = (EmpregadoHorista) emp;
-                LocalDate contract = null;
-                for (CartaoDePonto c : h.cartoesDePonto) {
-                    if (contract == null || c.getData().isBefore(contract)) contract = c.getData();
-                }
-                periodEnd = currentDate;
-                periodStart = currentDate.minusDays(6);
-                if (contract != null && !contract.isAfter(periodEnd)) isPayday = true;
-            } else {
-                periodEnd = currentDate;
-                periodStart = currentDate.minusDays(6);
-            }
-        } if (emp instanceof EmpregadoComissionado) {
-            periodEnd = currentDate;
-            periodStart = currentDate.minusDays(13);
-            if (!currentDate.isBefore(comissionadoFirstPay)) {
-                long days = java.time.temporal.ChronoUnit.DAYS.between(comissionadoFirstPay, currentDate);
-                if (currentDate.getDayOfWeek() == java.time.DayOfWeek.FRIDAY && days % 14 == 0) isPayday = true;
-            }
-        } if (emp instanceof EmpregadoAssalariado) {
-            periodEnd = currentDate;
-            periodStart = currentDate.withDayOfMonth(1);
-            LocalDate lastDay = currentDate.withDayOfMonth(currentDate.lengthOfMonth());
-            if (currentDate.equals(lastDay)) isPayday = true;
-        }
-
-        if (!isPayday) continue;
-
-        LocalDate periodEndExclusive = periodEnd.plusDays(1);
-
-        double gross = 0.0;
-        double deductions = 0.0;
+        BigDecimal gross = BigDecimal.ZERO;
+        BigDecimal deductions = BigDecimal.ZERO;
         double normalHours = 0.0;
         double extraHours = 0.0;
+        boolean isPayday = false;
+
 
         if (emp instanceof EmpregadoHorista) {
-            EmpregadoHorista h = (EmpregadoHorista) emp;
-            double hourly = h.getSalario();
-            java.util.Map<LocalDate, Double> hoursByDay = new java.util.HashMap<>();
-            for (CartaoDePonto c : h.cartoesDePonto) {
-                LocalDate d2 = c.getData();
-                if ((d2.isEqual(periodStart) || d2.isAfter(periodStart)) && d2.isBefore(periodEndExclusive)) {
-                    hoursByDay.put(d2, hoursByDay.getOrDefault(d2, 0.0) + c.getHoras());
-                }
-            }
-            for (Double hrs : hoursByDay.values()) {
-                normalHours += Math.min(hrs, 8.0);
-                if (hrs > 8.0) extraHours += (hrs - 8.0);
-            }
-            gross = normalHours * hourly + extraHours * hourly * 1.5;
-        } else if (emp instanceof EmpregadoAssalariado) {
-            EmpregadoAssalariado a = (EmpregadoAssalariado) emp;
-            gross = a.getSalario();
-        } else if (emp instanceof EmpregadoComissionado) {
-                EmpregadoComissionado c = (EmpregadoComissionado) emp;
-                double base = c.getSalario() * 12.0 / 26.0;
-            double commissions = 0.0;
-            for (ResultadoDeVenda v : c.getResultadosDeVenda()) {
-                LocalDate d2 = v.getData();
-                if ((d2.isEqual(periodStart) || d2.isAfter(periodStart)) && d2.isBefore(periodEndExclusive)) {
-                    commissions += v.getValor() * c.getTaxaDeComissao();
-                }
-            }
-            gross = base + commissions;
-        }
+            if (isHoristaPayday) {
+                isPayday = true;
+                LocalDate periodEnd = currentDate;
+                LocalDate periodStart = currentDate.minusDays(6);
+                LocalDate periodEndExclusive = periodEnd.plusDays(1);
 
-        if (emp.isSindicalizado()) {
-            if (gross > 0.0) {
-                MembroSindicato ms = emp.getMembroSindicato();
-                double taxaDiaria = ms.getTaxaSindical();
-                long daysBetween;
-                if (emp instanceof EmpregadoHorista) {
-                    java.time.LocalDate lastPay = null;
-                    java.time.LocalDate probe = periodEnd.minusDays(7);
-                    while (probe.isAfter(java.time.LocalDate.of(1900,1,1))) {
-                        java.time.LocalDate pStart = probe.minusDays(6);
-                        java.time.LocalDate pEndEx = probe.plusDays(1);
-                        double hourly = ((EmpregadoHorista) emp).getSalario();
-                        java.util.Map<java.time.LocalDate, Double> hrs = new java.util.HashMap<>();
-                        for (CartaoDePonto cp : ((EmpregadoHorista) emp).cartoesDePonto) {
-                            java.time.LocalDate d2 = cp.getData();
-                            if ((d2.isEqual(pStart) || d2.isAfter(pStart)) && d2.isBefore(pEndEx)) {
-                                hrs.put(d2, hrs.getOrDefault(d2, 0.0) + cp.getHoras());
+                EmpregadoHorista h = (EmpregadoHorista) emp;
+                BigDecimal hourly = BigDecimal.valueOf(h.getSalario());
+                java.util.Map<LocalDate, Double> hoursByDay = new java.util.HashMap<>();
+                for (CartaoDePonto c : h.cartoesDePonto) {
+                    LocalDate d2 = c.getData();
+                    if ((d2.isEqual(periodStart) || d2.isAfter(periodStart)) && d2.isBefore(periodEndExclusive)) {
+                        hoursByDay.put(d2, hoursByDay.getOrDefault(d2, 0.0) + c.getHoras());
+                    }
+                }
+                for (Double hrs : hoursByDay.values()) {
+                    normalHours += Math.min(hrs, 8.0);
+                    if (hrs > 8.0) extraHours += (hrs - 8.0);
+                }
+                BigDecimal normalHoursBD = BigDecimal.valueOf(normalHours);
+                BigDecimal extraHoursBD = BigDecimal.valueOf(extraHours);
+                gross = normalHoursBD.multiply(hourly).add(extraHoursBD.multiply(hourly).multiply(BigDecimal.valueOf(1.5)));
+                gross = gross.setScale(2, RoundingMode.DOWN);
+
+                if (emp.isSindicalizado()) {
+                    if (gross.compareTo(BigDecimal.ZERO) > 0) {
+                        MembroSindicato ms = emp.getMembroSindicato();
+                        BigDecimal taxaDiaria = BigDecimal.valueOf(ms.getTaxaSindical());
+                        long daysBetween;
+                        java.time.LocalDate lastPay = null;
+                        java.time.LocalDate probe = periodEnd.minusDays(7);
+                        while (probe.isAfter(java.time.LocalDate.of(1900,1,1))) {
+                            java.time.LocalDate pStart = probe.minusDays(6);
+                            java.time.LocalDate pEndEx = probe.plusDays(1);
+                            double hourlyDouble = ((EmpregadoHorista) emp).getSalario();
+                            java.util.Map<java.time.LocalDate, Double> hrs = new java.util.HashMap<>();
+                            for (CartaoDePonto cp : ((EmpregadoHorista) emp).cartoesDePonto) {
+                                java.time.LocalDate d2 = cp.getData();
+                                if ((d2.isEqual(pStart) || d2.isAfter(pStart)) && d2.isBefore(pEndEx)) {
+                                    hrs.put(d2, hrs.getOrDefault(d2, 0.0) + cp.getHoras());
+                                }
+                            }
+                            double normalPrev = 0.0, extraPrev = 0.0;
+                            for (Double e : hrs.values()) {
+                                normalPrev += Math.min(e, 8.0);
+                                if (e > 8.0) extraPrev += (e - 8.0);
+                            }
+                            double grossPrev = (normalPrev * hourlyDouble) + (extraPrev * hourlyDouble * 1.5);
+                            if (grossPrev > 0.0) {
+                                lastPay = probe;
+                                break;
+                            }
+                            probe = probe.minusDays(7);
+                        }
+                        if (lastPay == null) {
+                            
+                            daysBetween = java.time.temporal.ChronoUnit.DAYS.between(periodStart, periodEndExclusive);
+                        } else {
+                            daysBetween = java.time.temporal.ChronoUnit.DAYS.between(lastPay.plusDays(1), periodEndExclusive);
+                        }
+                        deductions = deductions.add(taxaDiaria.multiply(BigDecimal.valueOf(daysBetween)));
+                        for (TaxaServico ts : ms.getTaxasDeServico()) {
+                            LocalDate d2 = ts.getData();
+                            if ((d2.isEqual(periodStart) || d2.isAfter(periodStart)) && d2.isBefore(periodEndExclusive)) {
+                                deductions = deductions.add(BigDecimal.valueOf(ts.getValor()));
                             }
                         }
-                        double normalPrev = 0.0, extraPrev = 0.0;
-                        for (Double h : hrs.values()) {
-                            normalPrev += Math.min(h, 8.0);
-                            if (h > 8.0) extraPrev += (h - 8.0);
-                        }
-                        double grossPrev = (normalPrev * hourly) + (extraPrev * hourly * 1.5);
-                        if (grossPrev > 0.0) {
-                            lastPay = probe;
-                            break;
-                        }
-                        probe = probe.minusDays(7);
                     }
-                    if (lastPay == null) {
-                        
-                        daysBetween = java.time.temporal.ChronoUnit.DAYS.between(periodStart, periodEndExclusive);
-                    } else {
-                        daysBetween = java.time.temporal.ChronoUnit.DAYS.between(lastPay.plusDays(1), periodEndExclusive);
-                    }
-                } else {
-                    daysBetween = java.time.temporal.ChronoUnit.DAYS.between(periodStart, periodEndExclusive);
-                }
-                deductions += taxaDiaria * daysBetween;
-        for (TaxaServico ts : ms.getTaxasDeServico()) {
-                LocalDate d2 = ts.getData();
-                if ((d2.isEqual(periodStart) || d2.isAfter(periodStart)) && d2.isBefore(periodEndExclusive)) {
-                    deductions += ts.getValor();
                 }
             }
-            }
+        } else if (emp instanceof EmpregadoComissionado) {
+            if(isComissionadoPayday) {
+                isPayday = true;
+                LocalDate periodEnd = currentDate;
+                LocalDate periodStart = currentDate.minusDays(13);
+                LocalDate periodEndExclusive = periodEnd.plusDays(1);
 
-        double net = gross - deductions;
-        if (net < 0) net = 0.0;
+                EmpregadoComissionado c = (EmpregadoComissionado) emp;
+                BigDecimal salarioBD = BigDecimal.valueOf(c.getSalario());
+                BigDecimal base = salarioBD.multiply(BigDecimal.valueOf(12)).divide(BigDecimal.valueOf(26), 2, RoundingMode.DOWN);
+                BigDecimal commissions = BigDecimal.ZERO;
+                for (ResultadoDeVenda v : c.getResultadosDeVenda()) {
+                    LocalDate d2 = v.getData();
+                    if ((d2.isEqual(periodStart) || d2.isAfter(periodStart)) && d2.isBefore(periodEndExclusive)) {
+                        commissions = commissions.add(BigDecimal.valueOf(v.getValor()).multiply(BigDecimal.valueOf(c.getTaxaDeComissao())));
+                    }
+                }
+                commissions = commissions.setScale(2, RoundingMode.DOWN);
+                gross = base.add(commissions);
+                gross = gross.setScale(2, RoundingMode.DOWN);
+                
+                 if (emp.isSindicalizado()) {
+                    if (gross.compareTo(BigDecimal.ZERO) > 0) {
+                        MembroSindicato ms = emp.getMembroSindicato();
+                        BigDecimal taxaDiaria = BigDecimal.valueOf(ms.getTaxaSindical());
+                        long daysBetween;
+                        java.time.LocalDate lastPay = null;
+                        java.time.LocalDate probe = periodEnd.minusDays(14);
+                        while (probe.isAfter(java.time.LocalDate.of(1900,1,1))) {
+                             java.time.LocalDate pStart = probe.minusDays(13);
+                             java.time.LocalDate pEndEx = probe.plusDays(1);
+                            double comissaoDouble = c.getTaxaDeComissao();
+                            double salarioDouble = c.getSalario();
+                            BigDecimal basePrev = BigDecimal.valueOf(salarioDouble).multiply(BigDecimal.valueOf(12)).divide(BigDecimal.valueOf(26), 2, RoundingMode.DOWN);
+                            BigDecimal commissionsPrev = BigDecimal.ZERO;
+                            for (ResultadoDeVenda v : c.getResultadosDeVenda()) {
+                                LocalDate d2 = v.getData();
+                                if ((d2.isEqual(pStart) || d2.isAfter(pStart)) && d2.isBefore(pEndEx)) {
+                                    commissionsPrev = commissionsPrev.add(BigDecimal.valueOf(v.getValor()).multiply(BigDecimal.valueOf(comissaoDouble)));
+                                }
+                            }
+                            commissionsPrev = commissionsPrev.setScale(2, RoundingMode.DOWN);
+                            BigDecimal grossPrev = basePrev.add(commissionsPrev);
+                            grossPrev = grossPrev.setScale(2, RoundingMode.DOWN);
+                            if (grossPrev.compareTo(BigDecimal.ZERO) > 0) {
+                                lastPay = probe;
+                                break;
+                            }
+                            probe = probe.minusDays(14);
+                        }
+                        
+                         if (lastPay == null) {
+                        
+                            daysBetween = java.time.temporal.ChronoUnit.DAYS.between(periodStart, periodEndExclusive);
+                        } else {
+                            daysBetween = java.time.temporal.ChronoUnit.DAYS.between(lastPay.plusDays(1), periodEndExclusive);
+                        }
+                        deductions = deductions.add(taxaDiaria.multiply(BigDecimal.valueOf(daysBetween)));
+                        for (TaxaServico ts : ms.getTaxasDeServico()) {
+                            LocalDate d2 = ts.getData();
+                            if ((d2.isEqual(periodStart) || d2.isAfter(periodStart)) && d2.isBefore(periodEndExclusive)) {
+                                deductions = deductions.add(BigDecimal.valueOf(ts.getValor()));
+                            }
+                        }
+                    }
+                }
+            }
+        } else if (emp instanceof EmpregadoAssalariado) {
+            if(isAssalariadoPayday) {
+                isPayday = true;
+                LocalDate periodEnd = currentDate;
+                LocalDate periodStart = currentDate.withDayOfMonth(1);
+                LocalDate periodEndExclusive = periodEnd.plusDays(1);
+                
+                EmpregadoAssalariado a = (EmpregadoAssalariado) emp;
+                gross = BigDecimal.valueOf(a.getSalario());
+                gross = gross.setScale(2, RoundingMode.DOWN);
+
+                if (emp.isSindicalizado()) {
+                    if (gross.compareTo(BigDecimal.ZERO) > 0) {
+                        MembroSindicato ms = emp.getMembroSindicato();
+                        BigDecimal taxaDiaria = BigDecimal.valueOf(ms.getTaxaSindical());
+                        long daysBetween = java.time.temporal.ChronoUnit.DAYS.between(periodStart, periodEndExclusive);
+                        deductions = deductions.add(taxaDiaria.multiply(BigDecimal.valueOf(daysBetween)));
+                        for (TaxaServico ts : ms.getTaxasDeServico()) {
+                            LocalDate d2 = ts.getData();
+                            if ((d2.isEqual(periodStart) || d2.isAfter(periodStart)) && d2.isBefore(periodEndExclusive)) {
+                                deductions = deductions.add(BigDecimal.valueOf(ts.getValor()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if(!isPayday) continue;
+        
+        deductions = deductions.setScale(2, RoundingMode.DOWN);
+        BigDecimal net = gross.subtract(deductions);
+        if (net.compareTo(BigDecimal.ZERO) < 0) net = BigDecimal.ZERO;
+        net = net.setScale(2, RoundingMode.DOWN);
 
         String metodoStr = "";
         MetodoPagamento mp = emp.getMetodoPagamentoObjeto();
@@ -743,21 +817,23 @@ public class SistemaFolha implements Serializable, Cloneable {
         }
 
         if (emp instanceof EmpregadoHorista) {
-            String line = String.format("%-38s %5s %5s %13s %9s %15s %s",
+            String horasNormaisStr = normalHours == Math.floor(normalHours) ? String.valueOf((int) normalHours) : df1.format(normalHours);
+            String horasExtrasStr = extraHours == Math.floor(extraHours) ? String.valueOf((int) extraHours) : df1.format(extraHours);
+            String line = String.format("%-36s %5s %5s %13s %9s %15s %s",
                     emp.getNome(),
-                    (normalHours == Math.floor(normalHours) ? String.valueOf((int) normalHours) : String.format("%.1f", normalHours).replace('.', ',')),
-                    (extraHours == Math.floor(extraHours) ? String.valueOf((int) extraHours) : String.format("%.1f", extraHours).replace('.', ',')),
+                    horasNormaisStr,
+                    horasExtrasStr,
                     df2.format(gross),
                     df2.format(deductions),
                     df2.format(net),
                     metodoStr);
-            horistasLines.add(line);
+            horistasLines.append(line).append("\n");
 
-            totalHoristasNormalHours += normalHours;
-            totalHoristasExtraHours += extraHours;
-            totalHoristasBruto += gross;
-            totalHoristasDescontos += deductions;
-            totalHoristasLiquido += net;
+            totalHoristasNormalHours = totalHoristasNormalHours.add(BigDecimal.valueOf(normalHours));
+            totalHoristasExtraHours = totalHoristasExtraHours.add(BigDecimal.valueOf(extraHours));
+            totalHoristasBruto = totalHoristasBruto.add(gross);
+            totalHoristasDescontos = totalHoristasDescontos.add(deductions);
+            totalHoristasLiquido = totalHoristasLiquido.add(net);
         } else if (emp instanceof EmpregadoAssalariado) {
             String line = String.format("%-45s %13s %9s %15s %s",
                     emp.getNome(),
@@ -765,28 +841,31 @@ public class SistemaFolha implements Serializable, Cloneable {
                     df2.format(deductions),
                     df2.format(net),
                     metodoStr);
-            assalariadosLines.add(line);
+            assalariadosLines.append(line).append("\n");
 
-            totalAssalariadosBruto += gross;
-            totalAssalariadosDescontos += deductions;
-            totalAssalariadosLiquido += net;
+            totalAssalariadosBruto = totalAssalariadosBruto.add(gross);
+            totalAssalariadosDescontos = totalAssalariadosDescontos.add(deductions);
+            totalAssalariadosLiquido = totalAssalariadosLiquido.add(net);
         } else if (emp instanceof EmpregadoComissionado) {
             String line = String.format("%-21s %7s %8s %8s %12s %8s %14s %s",
                     emp.getNome(),
-                    df2.format(0.0),
-                    df2.format(0.0),
-                    df2.format(0.0),
+                    df2.format(BigDecimal.ZERO),
+                    df2.format(BigDecimal.ZERO),
+                    df2.format(BigDecimal.ZERO),
                     df2.format(gross),
                     df2.format(deductions),
                     df2.format(net),
                     metodoStr);
-            comissionadosLines.add(line);
+            comissionadosLines.append(line).append("\n");
 
-            totalComissionadosBruto += gross;
-            totalComissionadosDescontos += deductions;
-            totalComissionadosLiquido += net;
+            totalComissionadosBruto = totalComissionadosBruto.add(gross);
+            totalComissionadosDescontos = totalComissionadosDescontos.add(deductions);
+            totalComissionadosLiquido = totalComissionadosLiquido.add(net);
         }
-    } 
+
+        
+    }
+    
 
     StringBuilder sb = new StringBuilder();
     sb.append(String.format("FOLHA DE PAGAMENTO DO DIA %04d-%02d-%02d\n", currentDate.getYear(), currentDate.getMonthValue(), currentDate.getDayOfMonth()));
@@ -796,75 +875,77 @@ public class SistemaFolha implements Serializable, Cloneable {
     sb.append("===============================================================================================================================\n");
     sb.append("Nome                                 Horas Extra Salario Bruto Descontos Salario Liquido Metodo\n");
     sb.append("==================================== ===== ===== ============= ========= =============== ======================================\n");
-    for (String l : horistasLines) {
-        sb.append(l).append("\n");
-    }
+    sb.append(horistasLines.toString());
     sb.append("\n");
-    sb.append(String.format("TOTAL HORISTAS                          %d     %d        %s     %s          %s\n\n",
-            (int) totalHoristasNormalHours,
-            (int) totalHoristasExtraHours,
-            df2.format(totalHoristasBruto),
-            df2.format(totalHoristasDescontos),
-            df2.format(totalHoristasLiquido)
+    sb.append(String.format("TOTAL HORISTAS                          %5s %5s        %s     %s          %s\n",
+            totalHoristasNormalHours.stripTrailingZeros().toPlainString().replace('.', ','),
+            totalHoristasExtraHours.stripTrailingZeros().toPlainString().replace('.', ','),
+            df2.format(totalHoristasBruto.setScale(2, RoundingMode.DOWN)),
+            df2.format(totalHoristasDescontos.setScale(2, RoundingMode.DOWN)),
+            df2.format(totalHoristasLiquido.setScale(2, RoundingMode.DOWN))
     ));
+    sb.append("\n\n");
 
     sb.append("===============================================================================================================================\n");
     sb.append("===================== ASSALARIADOS ============================================================================================\n");
     sb.append("===============================================================================================================================\n");
     sb.append("Nome                                             Salario Bruto Descontos Salario Liquido Metodo\n");
     sb.append("================================================ ============= ========= =============== ======================================\n\n");
-    for (String l : assalariadosLines) {
-        sb.append(l).append("\n");
-    }
+    sb.append(assalariadosLines.toString());
     sb.append("\n");
-    sb.append(String.format("TOTAL ASSALARIADOS                                        %s      %s            %s\n\n",
-            df2.format(totalAssalariadosBruto),
-            df2.format(totalAssalariadosDescontos),
-            df2.format(totalAssalariadosLiquido)
+    sb.append(String.format("TOTAL ASSALARIADOS                                        %s      %s            %s",
+            df2.format(totalAssalariadosBruto.setScale(2, RoundingMode.DOWN)),
+            df2.format(totalAssalariadosDescontos.setScale(2, RoundingMode.DOWN)),
+            df2.format(totalAssalariadosLiquido.setScale(2, RoundingMode.DOWN))
     ));
+    sb.append("\n\n");
 
     sb.append("===============================================================================================================================\n");
     sb.append("===================== COMISSIONADOS ===========================================================================================\n");
     sb.append("===============================================================================================================================\n");
     sb.append("Nome                  Fixo     Vendas   Comissao Salario Bruto Descontos Salario Liquido Metodo\n");
     sb.append("===================== ======== ======== ======== ============= ========= =============== ======================================\n\n");
-    for (String l : comissionadosLines) {
-        sb.append(l).append("\n");
-    }
+    sb.append(comissionadosLines.toString());
     sb.append("\n");
     sb.append(String.format("TOTAL COMISSIONADOS       %s     %s     %s          %s      %s            %s\n",
-            df2.format(0.0),
-            df2.format(0.0),
-            df2.format(0.0),
-            df2.format(totalComissionadosBruto),
-            df2.format(totalComissionadosDescontos),
-            df2.format(totalComissionadosLiquido)));
+            df2.format(BigDecimal.ZERO),
+            df2.format(BigDecimal.ZERO),
+            df2.format(BigDecimal.ZERO),
+            df2.format(totalComissionadosBruto.setScale(2, RoundingMode.DOWN)),
+            df2.format(totalComissionadosDescontos.setScale(2, RoundingMode.DOWN)),
+            df2.format(totalComissionadosLiquido.setScale(2, RoundingMode.DOWN))));
 
-    double totalFolha = totalHoristasBruto + totalAssalariadosBruto + totalComissionadosBruto;
-    sb.append(String.format("TOTAL FOLHA: %s\n", df2.format(totalFolha)));
+    BigDecimal totalFolha = totalHoristasBruto.add(totalAssalariadosBruto).add(totalComissionadosBruto);
+    sb.append(String.format("TOTAL FOLHA: %s\n", df2.format(totalFolha.setScale(2, RoundingMode.DOWN))));
 
     java.nio.file.Files.write(java.nio.file.Paths.get(saida), sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
-}
     
     public String totalFolha(LocalDate data) {
         Objects.requireNonNull(data, "Data invalida.");
+        
+        DecimalFormatSymbols symbols = new DecimalFormatSymbols();
+        symbols.setDecimalSeparator(',');
+        DecimalFormat df2 = new DecimalFormat("0.00", symbols);
+        df2.setRoundingMode(RoundingMode.DOWN);
+
+        BigDecimal total = BigDecimal.ZERO;
 
         if (isEndOfMonth(data)) {
-            return sumBrutoAssalariados();
+            total = total.add(new BigDecimal(sumBrutoAssalariados().replace(',', '.')));
         }
 
         if (isComissionadoPayday(data)) {
             LocalDate inicioPeriodo = data.minusDays(13);
-            return sumBrutoComissionados(inicioPeriodo, data);
+            total = total.add(new BigDecimal(sumBrutoComissionados(inicioPeriodo, data).replace(',', '.')));
         }
 
         if (data.getDayOfWeek() == DayOfWeek.FRIDAY) {
             LocalDate inicioSemana = data.minusDays(6); 
-            return sumBrutoHoristas(inicioSemana, data);
+            total = total.add(new BigDecimal(sumBrutoHoristas(inicioSemana, data).replace(',', '.')));
         }
-
-        return "0,00";
+        
+        return df2.format(total);
     }
 
 
@@ -875,63 +956,65 @@ public class SistemaFolha implements Serializable, Cloneable {
 
     private boolean isComissionadoPayday(LocalDate d) {
         if (d.getDayOfWeek() != DayOfWeek.FRIDAY) return false;
-        LocalDate base = LocalDate.of(2005, 1, 1); 
-        long dias = ChronoUnit.DAYS.between(base, d);
-        return (dias % 14) == 13;
+        LocalDate base = LocalDate.of(2005, 1, 14); 
+        long days = ChronoUnit.DAYS.between(base, d);
+        return days % 14 == 0;
     }
 
     private String sumBrutoHoristas(LocalDate inicio, LocalDate fim) {
-        double total = 0.00;
+        BigDecimal total = BigDecimal.ZERO;
         for (Empregado e : this.empregados.values()) { 
             if (e instanceof EmpregadoHorista) {
                 EmpregadoHorista h = (EmpregadoHorista) e;
-                double brutoSemana = calcularBrutoHorista(h, inicio, fim);
-                total += brutoSemana;
+                BigDecimal brutoSemana = calcularBrutoHorista(h, inicio, fim);
+                total = total.add(brutoSemana);
             }
         }
-        return String.format("%.2f", total).replace('.', ',');
+        return total.setScale(2, RoundingMode.DOWN).toString().replace('.', ',');
     }
 
 
     private String sumBrutoComissionados(LocalDate inicio, LocalDate fim) {
-        double total = 0.00;
+        BigDecimal total = BigDecimal.ZERO;
         for (Empregado e : this.empregados.values()) { 
             if (e instanceof EmpregadoComissionado) {
                 EmpregadoComissionado c = (EmpregadoComissionado) e;
-                double fixoQuinzenal = c.getSalarioMensal() * 12.0 / 26.0;
-                double valorVendas = somarVendas(c, inicio, fim); 
-                double comissao = valorVendas * c.getTaxaDeComissao();
-                total += (fixoQuinzenal + comissao);
+                BigDecimal salarioBD = new BigDecimal(String.valueOf(c.getSalario()));
+                BigDecimal fixoQuinzenal = salarioBD.multiply(BigDecimal.valueOf(12)).divide(BigDecimal.valueOf(26), 2, RoundingMode.DOWN);
+                BigDecimal comissao = BigDecimal.valueOf(somarVendas(c, inicio, fim)).multiply(BigDecimal.valueOf(c.getTaxaDeComissao())).setScale(2, RoundingMode.DOWN);
+                total = total.add(fixoQuinzenal).add(comissao);
             }
         }
-        return String.format("%.2f", total).replace('.', ',');
+        return total.setScale(2, RoundingMode.DOWN).toString().replace('.', ',');
     }
 
     private String sumBrutoAssalariados() {
-        double total = 0.00;
+        BigDecimal total = BigDecimal.ZERO;
         for (Empregado e : this.empregados.values()) { 
             if (e instanceof EmpregadoAssalariado && !(e instanceof EmpregadoComissionado)) {
                 EmpregadoAssalariado a = (EmpregadoAssalariado) e;
-                total += a.getSalarioMensal();
+                total = total.add(BigDecimal.valueOf(a.getSalarioMensal()));
             }
         }
-        return String.format("%.2f", total).replace('.', ',');
+        return total.setScale(2, RoundingMode.DOWN).toString().replace('.', ',');
     }
 
-    private double calcularBrutoHorista(EmpregadoHorista h, LocalDate inicio, LocalDate fim) {
-        double total = 0.0;
+    private BigDecimal calcularBrutoHorista(EmpregadoHorista h, LocalDate inicio, LocalDate fim) {
+        BigDecimal total = BigDecimal.ZERO;
         for (CartaoDePonto cp : h.cartoesDePonto) {
             LocalDate d = cp.getData();
             if (!d.isBefore(inicio) && !d.isAfter(fim)) {
                 double horas  = cp.getHoras();
                 double normal = Math.min(horas, 8.0);
                 double extra  = Math.max(0.0, horas - 8.0);
-                double vh = h.getSalarioPorHora();     
-
-                total += normal * vh + extra * vh * 1.5;
+                BigDecimal vh = BigDecimal.valueOf(h.getSalarioPorHora());     
+                BigDecimal normalBD = BigDecimal.valueOf(normal);
+                BigDecimal extraBD = BigDecimal.valueOf(extra);
+                
+                total = total.add(normalBD.multiply(vh).add(extraBD.multiply(vh).multiply(new BigDecimal("1.5"))));
             }
         }
-        return total;
+        return total.setScale(2, RoundingMode.DOWN);
     }
 
     private double somarVendas(EmpregadoComissionado c, LocalDate inicio, LocalDate fim) {
